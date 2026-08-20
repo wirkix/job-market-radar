@@ -1,0 +1,135 @@
+# CLAUDE.md
+
+Guidance for Claude Code (and future contributors) working in this repo.
+
+## What this is
+
+Portfolio project #1 of 6 in a data-engineering roadmap (see
+`professional-website`'s `/portfolio` page and the "Data Pipeline Roadmap"
+artifact from that planning session). Scrapes WeWorkRemotely job postings,
+LLM-enriches them, and models the result into a star-schema warehouse in
+Postgres, queried by Power BI. Full pipeline story and architecture diagram
+are in [README.md](README.md) — read that first, it's not duplicated here.
+
+## Repo layout
+
+```
+scraper/    extract & clean (stage 1) — RSS discovery + detail-page HTML
+            scraping, no DB writes outside db.py
+enrich/     process & enrich (stage 2) — LLM classification via Anthropic
+            or Ollama, picked by ENRICHMENT_PROVIDER
+dbt/        marts (stage 3) — staging views + the star schema itself
+airflow/    dags/job_market_radar_dag.py orchestrates all three stages daily
+power_bi/   REPORT_SPEC.md — the one stage that isn't automated (Power BI
+            Desktop has no authoring API); everything up to the warehouse
+            tables is code, this doc is the recipe for the last manual step
+docker/     airflow.Dockerfile + postgres init script
+tests/      pytest — clean.py/providers.py logic + a fixture-based test
+            against a real saved WWR HTML page (tests/fixtures/)
+```
+
+## Local dev environment
+
+This was built on a machine with **no admin-installed Python other than
+3.14** on the host (too new for Airflow/dbt) — a `.venv` was created just
+for running `pytest` and ad-hoc scraper smoke tests against the *host*
+Python, using only pure-Python-importable pieces (`scraper.clean`,
+`scraper.discover`, `scraper.fetch_detail` — nothing that imports
+`psycopg2`, since that's what `scraper.db` needs and the tests never touch
+the DB). Airflow/dbt themselves only ever run inside the Docker containers,
+which bundle their own supported Python — the host Python version is
+irrelevant to them.
+
+**TLS note:** this dev machine has a corporate root CA in its Windows cert
+store that Python's `certifi` bundle doesn't know about, so plain
+`requests` calls against HTTPS sites fail with
+`CERTIFICATE_VERIFY_FAILED` from the host Python (curl worked fine — it
+uses the OS store). Worked around locally with the `truststore` package
+(`truststore.inject_into_ssl()`) for one-off smoke-test scripts only — it's
+**not** a project dependency, don't add it to `requirements-*.txt`. If this
+resurfaces inside a container, it's almost certainly a different cause
+(containers don't inherit the host's Windows cert store) — investigate
+fresh rather than assuming the same fix applies.
+
+## WeWorkRemotely scraping specifics
+
+- `/categories/<slug>` serves a JS app shell, not data. The actual feed is
+  `/categories/<slug>.rss` — this tripped up initial development (a legacy
+  invalid slug happened to 302/fallback into a sitewide RSS feed, which
+  looked like it was working until the categories turned out not to be
+  filtered). If WWR's URL scheme changes again, re-verify with `curl` before
+  assuming the scraper's selectors are what broke.
+- The RSS `<description>` has the *full* job posting HTML — this is the
+  only place the description text comes from. The detail page's own
+  description div is empty unless logged in (signup wall); only scrape the
+  detail page for the sidebar metadata (job type, salary, apply-by,
+  canonical company name, "About the job" list).
+- `scraper/fetch_detail.py`'s CSS selectors
+  (`.lis-container__header__hero__company-info__title` etc.) are the
+  single most likely thing to break if WWR redesigns again.
+  `tests/test_fetch_detail.py` runs against a real saved page specifically
+  so that breakage fails loudly in CI/tests instead of silently in
+  production (every field would just start coming back `None`).
+
+## dbt
+
+No `dbt_utils` dependency on purpose — every surrogate key is a plain
+`md5(lower(...))` and `dim_date` is a hand-rolled `generate_series` spine,
+so `dbt build` never needs `dbt deps` to reach the dbt package hub. This
+was a deliberate simplicity choice for this project, not an oversight —
+project 05 in the roadmap (Databricks + dbt + CI) is where package
+dependencies and more elaborate testing patterns are the point.
+
+`fact_job_posting` only contains postings that passed the keyword
+pre-filter (`scraper/config.py::DATA_ROLE_KEYWORDS`) — this warehouse
+tracks data roles specifically, not the whole job board. `is_data_role`
+(from the LLM) is nullable and distinct from the keyword-filter concept:
+null means "not enriched yet," not "confirmed not a data role."
+
+## dbt lives in its own venv, not Airflow's environment
+
+`requirements-dbt.txt` (just `dbt-postgres`) is installed into
+`/opt/airflow/dbt-venv` by `docker/airflow.Dockerfile`, completely separate
+from Airflow's own Python environment (`requirements-airflow.txt`). This
+isn't a style choice — `pip install`-ing `dbt-postgres` alongside
+`apache-airflow-providers-postgres` in one environment sends pip's resolver
+into `ResolutionTooDeep` (it burned ~13 minutes churning through `dbt-core`/
+`dbt-common` version combinations before failing outright). dbt-core and
+Airflow pin close-but-incompatible versions of enough shared dependencies
+(click, Jinja2, protobuf...) that this is apparently a known clash between
+the two ecosystems, not something fixable with more precise version pins.
+The DAG's `dbt_build` task calls `/opt/airflow/dbt-venv/bin/dbt` directly
+rather than a bare `dbt` — don't "simplify" that back to one shared
+environment, it doesn't build.
+
+## Postgres init script needs an explicit `--dbname`
+
+`docker/postgres-init/01-create-airflow-db.sh` runs `psql --username
+"$POSTGRES_USER"` to create the second (Airflow) database. Without an
+explicit `--dbname`, psql defaults to connecting to a database *named after
+the username* (`radar`, here) — which doesn't exist, since the only
+database that exists at that point is `$POSTGRES_DB` (`job_market_radar`)
+plus the always-present `postgres` maintenance database. Fixed by adding
+`--dbname postgres` explicitly. If you ever see `FATAL: database "<user>"
+does not exist` from an init script like this again, it's this same
+footgun, not a new bug.
+
+Also: Postgres only runs `/docker-entrypoint-initdb.d/*` scripts against a
+genuinely empty data directory. If an init script fails partway through,
+the volume is left "initialized enough" that a restart won't retry it —
+`docker compose down -v` (removes the volume) before retrying, not just
+`docker compose up --build` again.
+
+## Known gotchas / history
+
+- `company_headquarters` is scraped out of free text (the posting's own
+  first paragraph, if it happens to start with "Headquarters: ...") because
+  WWR gates that field on the detail page behind a signup wall. Expect
+  frequent nulls — that's correct behavior, not a bug to "fix" by trying
+  harder regexes.
+- Docker Desktop was not installed when this project started; it was
+  installed via `winget install --id Docker.DockerDesktop -e --source
+  winget` mid-session. If `docker compose` commands fail with "docker not
+  found" or a daemon-connection error, Docker Desktop's first-run GUI setup
+  (EULA + WSL2 integration) may not have been completed yet — that part
+  needs a human at the keyboard, it can't be scripted.

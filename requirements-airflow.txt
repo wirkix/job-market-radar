@@ -1,0 +1,12 @@
+# Installed on top of the base apache/airflow image (see docker/airflow.Dockerfile).
+# Kept separate from requirements-dev.txt because this list has to match
+# whatever Python version the Airflow base image ships, not the host's.
+#
+# dbt-postgres is deliberately NOT here — see requirements-dbt.txt for why.
+
+apache-airflow-providers-postgres>=5.13.0
+requests>=2.32.0
+beautifulsoup4>=4.12.0
+psycopg2-binary>=2.9.9
+anthropic>=0.40.0
+python-dotenv>=1.0.1

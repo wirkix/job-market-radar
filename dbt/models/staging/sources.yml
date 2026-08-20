@@ -1,0 +1,19 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Written directly by the Python scraper (scraper/db.py) and the LLM enrichment step (enrich/enrich_llm.py) — nothing upstream of this in dbt's view.
+    schema: raw
+    tables:
+      - name: job_postings_raw
+        description: One row per scraped WWR job posting, deduped by posting_id (the WWR URL slug).
+        columns:
+          - name: posting_id
+            tests: [not_null, unique]
+          - name: apply_url
+            tests: [not_null]
+      - name: job_postings_enriched
+        description: LLM-classified fields for postings flagged as data-role candidates. Not every raw posting has a row here — only keyword-flagged candidates get sent to the LLM.
+        columns:
+          - name: posting_id
+            tests: [not_null, unique]

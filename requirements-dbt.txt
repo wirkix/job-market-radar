@@ -1,0 +1,13 @@
+# Installed into its own venv (/opt/airflow/dbt-venv, see
+# docker/airflow.Dockerfile), NOT into Airflow's own Python environment.
+#
+# dbt-core and apache-airflow pin conflicting versions of enough shared
+# dependencies (click, Jinja2, protobuf, packaging...) that pip's resolver
+# spins for a very long time and then fails outright (ResolutionTooDeep)
+# trying to reconcile both in one environment. This is a known clash
+# between the two ecosystems, not something specific to this project — the
+# fix is isolation, not more precise pins. The dbt_build task in the DAG
+# calls this venv's own `dbt` binary directly instead of relying on a
+# shared environment.
+
+dbt-postgres>=1.8.0

@@ -1,0 +1,10 @@
+# For running/testing the scraper and enrichment code standalone on your
+# host machine (outside the Airflow container) — e.g. `pytest tests/`.
+# Does not include dbt or Airflow itself; use the Docker stack for those.
+
+requests>=2.32.0
+beautifulsoup4>=4.12.0
+psycopg2-binary>=2.9.9
+anthropic>=0.40.0
+python-dotenv>=1.0.1
+pytest>=8.3.0

@@ -1,0 +1,71 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: One row per calendar day spanning the observed posting date range.
+    columns:
+      - name: date_key
+        tests: [not_null, unique]
+
+  - name: dim_company
+    description: One row per distinct employer seen across all scraped postings.
+    columns:
+      - name: company_key
+        tests: [not_null, unique]
+      - name: company_name
+        tests: [not_null]
+
+  - name: dim_location
+    description: One row per distinct job region (where the role is open to remote workers from).
+    columns:
+      - name: location_key
+        tests: [not_null, unique]
+
+  - name: dim_skill
+    description: One row per distinct tool/skill the LLM extracted from any posting's description.
+    columns:
+      - name: skill_key
+        tests: [not_null, unique]
+      - name: skill
+        tests: [not_null, unique]
+
+  - name: bridge_job_skill
+    description: Many-to-many resolver between fact_job_posting and dim_skill.
+    columns:
+      - name: job_posting_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('fact_job_posting')
+              field: job_posting_key
+      - name: skill_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_skill')
+              field: skill_key
+
+  - name: fact_job_posting
+    description: One row per scraped posting that matched the data-role keyword filter. Grain is one posting.
+    columns:
+      - name: job_posting_key
+        tests: [not_null, unique]
+      - name: date_key
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: company_key
+        tests:
+          - relationships:
+              to: ref('dim_company')
+              field: company_key
+      - name: location_key
+        tests:
+          - relationships:
+              to: ref('dim_location')
+              field: location_key
+      - name: seniority
+        tests:
+          - accepted_values:
+              values: ['junior', 'mid', 'senior', 'lead', 'unknown']
