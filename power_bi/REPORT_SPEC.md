@@ -10,10 +10,14 @@ repeatable rather than improvised.
 
 Power BI Desktop → Get Data → PostgreSQL database.
 
-- Server: `localhost:5432` (or wherever the `postgres` container is exposed)
+- Server: `localhost:5433` (the `postgres` container's host-side port —
+  remapped off the default 5432 because this dev machine also runs a
+  native PostgreSQL 15 Windows service that occupies 5432; see
+  `docker-compose.yml`'s `postgres.ports` comment)
 - Database: `job_market_radar`
-- Import the five `marts.*` tables: `fact_job_posting`, `dim_company`,
-  `dim_location`, `dim_date`, `dim_skill`, `bridge_job_skill`.
+- Import the six `public_marts.*` tables: `fact_job_posting`,
+  `dim_company`, `dim_location`, `dim_date`, `dim_skill`,
+  `bridge_job_skill`.
 
 ## Model
 
@@ -66,16 +70,25 @@ CALCULATE(
   `[Total Postings]` — shows which tools skew junior vs. senior
 
 **3. Companies & postings**
-- Table: `dim_company[company_name]`, `fact_job_posting[job_title]`,
-  `[seniority]`, `[salary_text]`, `[apply_url]` (set as a web URL column so
-  it's clickable)
-- Slicers: `dim_location[region]`, `fact_job_posting[job_type]`
+- Horizontal bar: `[Total Postings]` by `dim_company[company_name]`, sorted
+  descending, Top N filter (visual-level filter on `[Total Postings]`) to
+  keep it to the top ~17 employers
+- Table: `fact_job_posting[job_title]`, `[apply_url]` (set as a web URL
+  column so it's clickable) — click a bar in the chart to cross-filter the
+  table down to that company's actual listings. `company_name` is dropped
+  from the table since the chart selection already identifies it;
+  `seniority`/`salary_text` are dropped as mostly-uniform/mostly-null and
+  add no signal here. No slicers — the report isn't being published
+  interactively (see Publish below), so click-to-filter via the chart is
+  the only filtering surface that matters.
 
 ## Publish
 
-File → Publish → Power BI service (free tier), then **File → Embed report
-→ Publish to web** on the published report for a public, no-login embed
-URL — that's the link that goes in `portfolio/page.tsx`'s `demo` field.
-Publish to web makes the report fully public; don't use it if the data
-ever includes anything sensitive (it won't here — this only contains
-already-public job listing text).
+Not published to the Power BI service / embedded via Publish to web. The
+portfolio page instead links to two static artifacts: the `.pbix` file
+itself (download, for anyone who wants to open it in their own Power BI
+Desktop) and a PDF export of the report (`File → Export → Export to PDF`)
+as a no-login static preview. Both live in this `power_bi/` directory
+(`job_market_radar.pbix`, `job_market_radar.pdf`) and get re-exported
+whenever the report changes — the PDF is what `portfolio/page.tsx` should
+link/embed as the static preview, the `.pbix` as the download.
