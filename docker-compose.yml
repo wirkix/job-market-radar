@@ -26,7 +26,18 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       AIRFLOW_DB: ${AIRFLOW_DB}
     ports:
-      - "5432:5432"
+      # Host side is 5433, not 5432: this dev machine has a native
+      # PostgreSQL 15 Windows service (postgresql-x64-15) that auto-starts
+      # on boot and always wins the race for port 5432 on localhost, so
+      # anything connecting to localhost:5432 silently hits that unrelated
+      # server instead of this container (symptom: password/credentials
+      # errors from every client, for every role, regardless of firewall/AV
+      # state — because the connection never reaches this container at
+      # all). The container's *internal* port stays 5432 — only the host
+      # side is remapped, so container-to-container traffic (Airflow, dbt)
+      # is unaffected. External clients (Power BI, DBeaver) must connect to
+      # localhost:5433.
+      - "5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./docker/postgres-init:/docker-entrypoint-initdb.d
